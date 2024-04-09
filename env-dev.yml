@@ -1,0 +1,21 @@
+name: hydroweacast
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - cartopy
+  - chex
+  - colabtools
+  - dask
+  - dm-haiku
+  - dm-tree
+  - jraph
+  - jax
+  - matplotlib
+  - numpy
+  - pandas
+  - rtree
+  - scipy
+  - trimesh
+  - typing_extensions
+  - xarray
