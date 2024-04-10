@@ -3,9 +3,9 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - python
   - cartopy
   - chex
-  - colabtools
   - dask
   - dm-haiku
   - dm-tree

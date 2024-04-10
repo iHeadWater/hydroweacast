@@ -1,7 +1,7 @@
 <!--
  * @Author: Wenyu Ouyang
  * @Date: 2024-04-09 16:05:41
- * @LastEditTime: 2024-04-09 18:59:20
+ * @LastEditTime: 2024-04-10 14:46:35
  * @LastEditors: Wenyu Ouyang
  * @Description: Simple description for weather forecast for hydrological modeling
  * @FilePath: /hydroweacast/README.md
@@ -24,8 +24,8 @@ Install required packages:
 
 ```bash
 mamba env create -f env-dev.yml
-pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 # for developers
+conda activate hydroweacast
 pip install -r requirements-dev.txt
 ```
 

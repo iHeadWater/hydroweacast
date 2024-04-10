@@ -33,7 +33,7 @@ import os
 
 warnings.filterwarnings("ignore")
 
-
+# TODO: get stat files from google cloud; could be replaced by Minio
 gcs_client = storage.Client.create_anonymous_client()
 gcs_bucket = gcs_client.get_bucket("dm_graphcast")
 with gcs_bucket.blob("stats/diffs_stddev_by_level.nc").open("rb") as f:
@@ -45,6 +45,7 @@ with gcs_bucket.blob("stats/stddev_by_level.nc").open("rb") as f:
 
 
 def parse_file_parts(file_name):
+    # parse input files like "source-era5_date-2022-01-01_res-0.25_levels-13_steps-01.nc"
     return dict(part.split("-", 1) for part in file_name.split("_"))
 
 
@@ -73,6 +74,7 @@ def scale(
     center: Optional[float] = None,
     robust: bool = False,
 ) -> tuple[xarray.Dataset, matplotlib.colors.Normalize, str]:
+    # normalization
     vmin = np.nanpercentile(data, (2 if robust else 0))
     vmax = np.nanpercentile(data, (98 if robust else 100))
     if center is not None:
@@ -241,7 +243,10 @@ def drop_state(fn):
     return lambda **kw: fn(**kw)[0]
 
 
-def main():
+def main(args):
+    model_num = args.model_num
+    input_time_range = args.input_time_range
+    eval_steps = args.forecast_horizon
     # 配置日志记录器
     logging.basicConfig(
         filename="hydro.log",
@@ -250,20 +255,7 @@ def main():
     )
     # logging.info("这是一个测试日志")
     start_time = time.time()
-    gcs_client = storage.Client.create_anonymous_client()
-    gcs_bucket = gcs_client.get_bucket("dm_graphcast")
-    params_file_options = [
-        name
-        for blob in gcs_bucket.list_blobs(prefix="params/")
-        if (name := blob.name.removeprefix("params/"))
-    ]
-    # ['GraphCast - ERA5 1979-2017 - resolution 0.25 - pressure levels 37 - mesh 2to6 - precipitation input and output.npz', 'GraphCast_operational - ERA5-HRES 1979-2021 - resolution 0.25 - pressure levels 13 - mesh 2to6 - precipitation output only.npz', 'GraphCast_small - ERA5 1979-2015 - resolution 1.0 - pressure levels 13 - mesh 2to5 - precipitation input and output.npz']
-    print(params_file_options)
-    num_model = int(input("请输入你的选择："))
-    my_model = params_file_options[num_model]
-    print(my_model)
-    with gcs_bucket.blob(f"params/{my_model}").open("rb") as f:
-        ckpt = checkpoint.load(f, graphcast.CheckPoint)
+    gcs_bucket, name, ckpt = get_model(model_num)
     params = ckpt.params
     state = {}
     model_config = ckpt.model_config
@@ -282,17 +274,7 @@ def main():
         if (name := blob.name.removeprefix("dataset/"))
     ]
     print(dataset_file_options)
-    # ['source-era5_date-2022-01-01_res-0.25_levels-13_steps-01.nc', 'source-era5_date-2022-01-01_res-0.25_levels-13_steps-04.nc', 'source-era5_date-2022-01-01_res-0.25_levels-13_steps-12.nc', 'source-era5_date-2022-01-01_res-0.25_levels-37_steps-01.nc', 'source-era5_date-2022-01-01_res-0.25_levels-37_steps-04.nc', 'source-era5_date-2022-01-01_res-0.25_levels-37_steps-12.nc', 'source-era5_date-2022-01-01_res-1.0_levels-13_steps-01.nc', 'source-era5_date-2022-01-01_res-1.0_levels-13_steps-04.nc', 'source-era5_date-2022-01-01_res-1.0_levels-13_steps-12.nc', 'source-era5_date-2022-01-01_res-1.0_levels-13_steps-20.nc', 'source-era5_date-2022-01-01_res-1.0_levels-13_steps-40.nc', 'source-era5_date-2022-01-01_res-1.0_levels-37_steps-01.nc', 'source-era5_date-2022-01-01_res-1.0_levels-37_steps-04.nc', 'source-era5_date-2022-01-01_res-1.0_levels-37_steps-12.nc', 'source-era5_date-2022-01-01_res-1.0_levels-37_steps-20.nc', 'source-era5_date-2022-01-01_res-1.0_levels-37_steps-40.nc', 'source-fake_date-2000-01-01_res-6.0_levels-13_steps-01.nc', 'source-fake_date-2000-01-01_res-6.0_levels-13_steps-04.nc', 'source-fake_date-2000-01-01_res-6.0_levels-13_steps-12.nc', 'source-fake_date-2000-01-01_res-6.0_levels-13_steps-20.nc', 'source-fake_date-2000-01-01_res-6.0_levels-13_steps-40.nc', 'source-fake_date-2000-01-01_res-6.0_levels-37_steps-01.nc', 'source-fake_date-2000-01-01_res-6.0_levels-37_steps-04.nc', 'source-fake_date-2000-01-01_res-6.0_levels-37_steps-12.nc', 'source-fake_date-2000-01-01_res-6.0_levels-37_steps-20.nc', 'source-fake_date-2000-01-01_res-6.0_levels-37_steps-40.nc', 'source-hres_date-2022-01-01_res-0.25_levels-13_steps-01.nc', 'source-hres_date-2022-01-01_res-0.25_levels-13_steps-04.nc', 'source-hres_date-2022-01-01_res-0.25_levels-13_steps-12.nc']
-    num_dataset = int(input("请输入你的选择："))
-    my_dataset = dataset_file_options[num_dataset]
-    print(my_dataset)
-    if not data_valid_for_model(my_dataset, model_config, task_config):
-        raise ValueError(
-            "Invalid dataset file, rerun the cell above and choose a valid dataset file."
-        )
-    with gcs_bucket.blob(f"dataset/{my_dataset}").open("rb") as f:
-        example_batch = xarray.load_dataset(f).compute()
-    assert example_batch.dims["time"] >= 3  # 2 for input, >=1 for targets
+    example_batch = get_data(gcs_bucket, dataset_file_options, model_config, task_config, input_time_range)
     second_part_end_time = time.time()
     second_part_duration = second_part_end_time - first_part_end_time
     print("加载数据运行时间: {:.2f} 秒".format(second_part_duration))
@@ -318,7 +300,7 @@ def main():
     # eval_steps = widgets.IntSlider(
     #     value=example_batch.sizes["time"]-2, min=1, max=example_batch.sizes["time"]-2, description="Eval steps")
     train_steps = int(input("1 to " + str(example_batch.sizes["time"] - 2) + ": "))
-    eval_steps = int(input("1 to " + str(example_batch.sizes["time"] - 2) + ": "))
+    # eval_steps = int(input("1 to " + str(example_batch.sizes["time"] - 2) + ": "))
     print("train steps: {:.0f} ".format(train_steps))
     print("eval steps: {:.0f} ".format(eval_steps))
     logging.info("train steps: {:.0f} ".format(train_steps))
@@ -424,6 +406,101 @@ def main():
     print("总运行时间: {:.2f} 秒".format(total_duration))
     logging.info("总运行时间: {:.2f} 秒".format(total_duration))
 
+def get_model(num_model):
+    """Load trained model according to the model number
+
+    Parameters
+    ----------
+    num_model : int
+        0 - graphcast; 1 - graphcast_operational; 2 - graphcast_small
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    gcs_client = storage.Client.create_anonymous_client()
+    gcs_bucket = gcs_client.get_bucket("dm_graphcast")
+    params_file_options = [
+        name
+        for blob in gcs_bucket.list_blobs(prefix="params/")
+        if (name := blob.name.removeprefix("params/"))
+    ]
+    # ['GraphCast - ERA5 1979-2017 - resolution 0.25 - pressure levels 37 - mesh 2to6 - precipitation input and output.npz', 'GraphCast_operational - ERA5-HRES 1979-2021 - resolution 0.25 - pressure levels 13 - mesh 2to6 - precipitation output only.npz', 'GraphCast_small - ERA5 1979-2015 - resolution 1.0 - pressure levels 13 - mesh 2to5 - precipitation input and output.npz']
+    print(params_file_options)
+    my_model = params_file_options[num_model]
+    print(my_model)
+    with gcs_bucket.blob(f"params/{my_model}").open("rb") as f:
+        ckpt = checkpoint.load(f, graphcast.CheckPoint)
+    return gcs_bucket,name,ckpt
+
+def get_data(gcs_bucket, dataset_file_options, model_config, task_config, input_time_range):
+    """Get era5 input data according to the input_time_range
+    default data dir is located in our MinIO server, varaibles are fixed
+    
+    # ['source-era5_date-2022-01-01_res-0.25_levels-13_steps-01.nc', 'source-era5_date-2022-01-01_res-0.25_levels-13_steps-04.nc', 'source-era5_date-2022-01-01_res-0.25_levels-13_steps-12.nc', 'source-era5_date-2022-01-01_res-0.25_levels-37_steps-01.nc', 'source-era5_date-2022-01-01_res-0.25_levels-37_steps-04.nc', 'source-era5_date-2022-01-01_res-0.25_levels-37_steps-12.nc', 'source-era5_date-2022-01-01_res-1.0_levels-13_steps-01.nc', 'source-era5_date-2022-01-01_res-1.0_levels-13_steps-04.nc', 'source-era5_date-2022-01-01_res-1.0_levels-13_steps-12.nc', 'source-era5_date-2022-01-01_res-1.0_levels-13_steps-20.nc', 'source-era5_date-2022-01-01_res-1.0_levels-13_steps-40.nc', 'source-era5_date-2022-01-01_res-1.0_levels-37_steps-01.nc', 'source-era5_date-2022-01-01_res-1.0_levels-37_steps-04.nc', 'source-era5_date-2022-01-01_res-1.0_levels-37_steps-12.nc', 'source-era5_date-2022-01-01_res-1.0_levels-37_steps-20.nc', 'source-era5_date-2022-01-01_res-1.0_levels-37_steps-40.nc', 'source-fake_date-2000-01-01_res-6.0_levels-13_steps-01.nc', 'source-fake_date-2000-01-01_res-6.0_levels-13_steps-04.nc', 'source-fake_date-2000-01-01_res-6.0_levels-13_steps-12.nc', 'source-fake_date-2000-01-01_res-6.0_levels-13_steps-20.nc', 'source-fake_date-2000-01-01_res-6.0_levels-13_steps-40.nc', 'source-fake_date-2000-01-01_res-6.0_levels-37_steps-01.nc', 'source-fake_date-2000-01-01_res-6.0_levels-37_steps-04.nc', 'source-fake_date-2000-01-01_res-6.0_levels-37_steps-12.nc', 'source-fake_date-2000-01-01_res-6.0_levels-37_steps-20.nc', 'source-fake_date-2000-01-01_res-6.0_levels-37_steps-40.nc', 'source-hres_date-2022-01-01_res-0.25_levels-13_steps-01.nc', 'source-hres_date-2022-01-01_res-0.25_levels-13_steps-04.nc', 'source-hres_date-2022-01-01_res-0.25_levels-13_steps-12.nc']
+
+    Parameters
+    ----------
+    gcs_bucket : _type_
+        _description_
+    dataset_file_options : _type_
+        _description_
+    model_config : _type_
+        _description_
+    task_config : _type_
+        _description_
+    input_time_range
+        a list of input time range, e.g., ['2022-01-01 00:00:00', '2022-01-01 06:00:00'], 
+        which means how long era5 data will be used for prediction
+
+    Returns
+    -------
+    _type_
+        _description_
+
+    Raises
+    ------
+    ValueError
+        _description_
+    """
+    num_dataset = int(input("请输入你的选择："))
+    my_dataset = dataset_file_options[num_dataset]
+    print(my_dataset)
+    if not data_valid_for_model(my_dataset, model_config, task_config):
+        raise ValueError(
+                "Invalid dataset file, rerun the cell above and choose a valid dataset file."
+            )
+    with gcs_bucket.blob(f"dataset/{my_dataset}").open("rb") as f:
+        example_batch = xarray.load_dataset(f).compute()
+    assert example_batch.dims["time"] >= 3  # 2 for input, >=1 for targets
+    return example_batch
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Run hydroweacast models"
+    )
+    parser.add_argument(
+        "--model_num",
+        dest="model_num",
+        help="there are 3 models: 0 - graphcast; 1 - graphcast_operational; 2 - graphcast_small",
+        default=0,
+        type=int,
+    )
+    parser.add_argument(
+        "--input_time_range",
+        dest="input_time_range",
+        help="a list of input time range, e.g., ['2022-01-01 00:00:00', '2022-01-01 06:00:00'], "
+        +"which means how long era5 data will be used for prediction",
+        default=None,
+        type=str,
+    )
+    parser.add_argument(
+        "--forecast_horizon",
+        dest="forecast_horizon",
+        help="an int number of forecast horizon, e.g., 6, which means the forecast horizon is 6 hours",
+        default=24,
+        type=int,
+    )
+    the_args = parser.parse_args()
+    main(the_args)
