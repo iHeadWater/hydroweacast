@@ -476,6 +476,48 @@ def get_data(gcs_bucket, dataset_file_options, model_config, task_config, input_
     assert example_batch.dims["time"] >= 3  # 2 for input, >=1 for targets
     return example_batch
 
+class GraphCast:
+    def __init__(self):
+        self.param_path = ''
+        self.dataset_path = ''
+        self.predict_path = ''
+        self.eval_num = 1
+    def run(self):
+        start_time = time.time()
+        with open(f"generate/graphcast/google_deepmind/dm_graphcast/params/{self.param_path}", "rb") as f:
+              ckpt = checkpoint.load(f, graphcast.CheckPoint)
+        params = ckpt.params
+        state = {}
+        model_config = ckpt.model_config
+        task_config = ckpt.task_config
+        first_part_end_time = time.time()
+        first_part_duration = first_part_end_time - start_time
+        print("加载模型运行时间: {:.2f} 秒".format(first_part_duration))
+        print("Model config:", model_config)
+        with open(f"generate/graphcast/google_deepmind/dm_graphcast/dataset/{self.dataset_path}", "rb") as f:
+          example_batch = xarray.load_dataset(f).compute()
+        assert example_batch.dims["time"] >= 3  # 2 for input, >=1 for targets
+        second_part_end_time = time.time()
+        second_part_duration = second_part_end_time - first_part_end_time
+        print("加载数据运行时间: {:.2f} 秒".format(second_part_duration))
+        # eval_steps = int(input("1 to "+str(example_batch.sizes["time"]-2)+": "))
+        print("eval steps: {:.0f} ".format(self.eval_num))
+        eval_inputs, eval_targets, eval_forcings = data_utils.extract_inputs_targets_forcings(
+            example_batch, target_lead_times=slice("6h", f"{self.eval_num*6}h"),
+            **dataclasses.asdict(task_config))
+        run_forward_jitted = drop_state(with_params(jax.jit(with_configs(
+            run_forward.apply,model_config,task_config)),params,state))
+        assert model_config.resolution in (0, 360. / eval_inputs.sizes["lon"]), (
+          "Model resolution doesn't match the data resolution. You likely want to "
+          "re-filter the dataset list, and download the correct data.")
+        predictions = rollout.chunked_prediction(
+            run_forward_jitted,
+            rng=jax.random.PRNGKey(0),
+            inputs=eval_inputs,
+            targets_template=eval_targets * np.nan,
+            forcings=eval_forcings)
+        return predictions
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Run hydroweacast models"
