@@ -22,3 +22,6 @@ dependencies:
   # dev
   - pytest
   - black
+  - pip
+  - pip:
+    - hydrodatasource
