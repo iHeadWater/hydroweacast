@@ -19,3 +19,6 @@ dependencies:
   - trimesh
   - typing_extensions
   - xarray
+  # dev
+  - pytest
+  - black
